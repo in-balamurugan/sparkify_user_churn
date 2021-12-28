@@ -1,1 +1,1 @@
-# sparkify_user_ch
+# sparkify_user_churn

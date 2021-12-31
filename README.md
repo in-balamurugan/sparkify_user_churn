@@ -1,6 +1,6 @@
 # Sparkify User churn prediction Project
 A model to predict the churn of users from the music platform Sparkify. Blog details here.
-
+https://balamurugan.netlify.app/post/sparkify-churn-analysis/
 
 ## Table of Contents
 

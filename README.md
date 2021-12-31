@@ -1,5 +1,6 @@
 # Sparkify User churn prediction Project
-A model to predict the churn of users from the music platform Sparkify
+A model to predict the churn of users from the music platform Sparkify. Blog details here.
+
 
 ## Table of Contents
 
@@ -15,7 +16,7 @@ A model to predict the churn of users from the music platform Sparkify
 |--data<br>
 |    &nbsp; &nbsp;&nbsp;  -- sparkify_users.csv # data to process<br>
 |--models<br>
-|    &nbsp; &nbsp;&nbsp;  -- SparkifyPreProcessing.ipynb #Processign in Spark<br>
+|    &nbsp; &nbsp;&nbsp;  -- SparkifyPreProcessing.ipynb #Processing in Spark<br>
 |    &nbsp; &nbsp;&nbsp;  -- Sparkify_model.py  #Building ML model<br>
 --&nbsp; README.md<br>
 

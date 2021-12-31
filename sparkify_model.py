@@ -27,15 +27,30 @@ import xgboost as xgb
 import warnings 
 warnings.filterwarnings('ignore')
 import time
+import pickle
+import shap
+from matplotlib import pyplot as plt
 
+
+MODEL_NAME = "xgb_full.pkl"
 SEED = 108
 N_FOLDS = 5
 CV_RESULT_DIR = "./xgboost_cv_results"
 TRAIN_FOLDS="/kaggle/working/train_folds.csv"
 SPARKIFY_USERS="/kaggle/input/sparkify-users/Sparkify_users.csv"
+tuned_params={'objective': 'binary:logistic', 'base_score': 0.5, 'booster': 'gbtree', 
+    'colsample_bylevel': 1, 'colsample_bynode': 1, 'colsample_bytree':  0.8702730765483531 ,
+    'gamma': 0.6041310184357518, 'gpu_id': -1, 'interaction_constraints': '', 'learning_rate': 0.300000012,
+    'max_delta_step': 0, 'max_depth': 7, 'min_child_weight': 4,'monotone_constraints': '()',
+    'n_jobs': -1, 'num_parallel_tree': 1, 'predictor': 'auto', 'random_state': 0, 'reg_alpha': 0, 'reg_lambda': 1, 'scale_pos_weight': 1,
+    'subsample': 0.799542263147059, 'tree_method': 'exact', 'validate_parameters': 1, 'verbosity': None, 
+    'eval_metric': 'auc'}
 
 def create_kfold(df):
-    print(df.columns)
+    print(df.dtypes)
+
+    #df.drop(['userId'], axis=1, inplace=True)
+    print(df.dtypes)
     print("*****Target***")
     print(df.Churn.unique())
     
@@ -64,9 +79,13 @@ def run_logistic(fold):
     # load the full training data with folds
     df = pd.read_csv(TRAIN_FOLDS)
     
+    #df.drop(['userId'], axis=1, inplace=True)
+
+
+    
     # all columns are features except id, target and kfold columns
     features = [
-    f for f in df.columns if f not in ("Churn")
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
     ]
     # get training data using folds
     df_train = df[df.kfold != fold].reset_index(drop=True)
@@ -80,7 +99,7 @@ def run_logistic(fold):
     x_valid = df_valid[features].values
 
     # initialize random forest model
-    model = linear_model.LogisticRegression()
+    model = linear_model.LogisticRegression(solver='liblinear')
 
 
     # fit model on training data (ohe)
@@ -105,12 +124,12 @@ def run_xgboost(fold):
     
     # all columns are features except id, target and kfold columns
     features = [
-    f for f in df.columns if f not in ("Churn","fold")
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
     ]
     # get training data using folds
     df_train = df[df.kfold != fold].reset_index(drop=True)
 
-    # ge./t validation data using folds
+    # get validation data using folds
     df_valid = df[df.kfold == fold].reset_index(drop=True)
 
     # get training data
@@ -118,7 +137,7 @@ def run_xgboost(fold):
     # get validation data
     x_valid = df_valid[features].values
 
-    # initialize random forest model
+    # initialize XGBoost model
     model = xgb.XGBClassifier(
             n_jobs=-1,
             max_depth=7,
@@ -149,38 +168,29 @@ def objective(trial):
     
     # all columns are features except id, target and kfold columns
     features = [
-    f for f in df.columns if f not in ("Churn","fold")
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
     ]
     
     dtrain = xgb.DMatrix(df[features].values, label=df['Churn'])
 
     param = {
-        "verbosity": 1,
+        "verbosity": 0,
         "objective": "binary:logistic",
         "eval_metric": "auc",
-        "booster": trial.suggest_categorical("booster", ["gbtree", "gblinear", "dart"]),
-        "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
         "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
         # sampling ratio for training data.
         "subsample": trial.suggest_float("subsample", 0.2, 1.0),
         # sampling according to each tree.
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.2, 1.0),
-        "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+        
     }
 
-    if param["booster"] == "gbtree" or param["booster"] == "dart":
-        param["max_depth"] = trial.suggest_int("max_depth", 1, 9)
-        # minimum child weight, larger the term more conservative the tree.
-        param["min_child_weight"] = trial.suggest_int("min_child_weight", 2, 10)
-        param["eta"] = trial.suggest_float("eta", 1e-8, 1.0, log=True)
-        param["gamma"] = trial.suggest_float("gamma", 1e-8, 1.0, log=True)
-        param["grow_policy"] = trial.suggest_categorical("grow_policy", ["depthwise", "lossguide"])
-
-    if param["booster"] == "dart":
-        param["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
-        param["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
-        param["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 1.0, log=True)
-        param["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 1.0, log=True)
+    param["max_depth"] = trial.suggest_int("max_depth", 1, 9)
+    # minimum child weight, larger the term more conservative the tree.
+    param["min_child_weight"] = trial.suggest_int("min_child_weight", 2, 10)
+    param["eta"] = trial.suggest_float("eta", 1e-8, 1.0, log=True)
+    param["gamma"] = trial.suggest_float("gamma", 1e-8, 1.0, log=True)
+    
 
     xgb_cv_results = xgb.cv(
         params=param,
@@ -210,7 +220,7 @@ def run_xgboost_tuned(fold,**best_params):
     
     # all columns are features except id, target and kfold columns
     features = [
-    f for f in df.columns if f not in ("Churn","fold")
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
     ]
     # get training data using folds
     df_train = df[df.kfold != fold].reset_index(drop=True)
@@ -223,27 +233,14 @@ def run_xgboost_tuned(fold,**best_params):
     # get validation data
     x_valid = df_valid[features].values
 
-    # initialize random forest model
+    # initialize XGB model
     model = xgb.XGBClassifier(
             n_jobs=-1,
-            eval_metric='mlogloss',
-            booster='dart',
-            #lambda = 2.821953496941091e-07,
-            alpha= 2.5646828346432774e-06,
-            subsample= 0.4151045743266873,
-            colsample_bytree= 0.6948040408445149,
-            max_depth= 8,
-            min_child_weight= 2,
-            eta= 0.03515347410218039,
-            gamma= 0.0002775302840172167,
-            grow_policy= 'depthwise',
-            sample_type= 'uniform',
-            normalize_type= 'forest',
-            rate_drop= 1.5923182802351157e-05,
-            skip_drop= 0.01448906401093845,
-            n_estimators= 251,
-            learning_rate=0.00047032141567833225
-              )
+            eval_metric='auc',
+            n_estimators=383  
+            )
+  
+    model.set_params(**tuned_params)
   
     #model.set_params(**best_params)
     print(model.get_xgb_params())
@@ -263,6 +260,51 @@ def run_xgboost_tuned(fold,**best_params):
     print(f"Tuned XGBoost:Fold = {fold},AUC = {auc}")
     return auc
 
+def print_important_features():
+# load the full training data with folds
+    df = pd.read_csv(TRAIN_FOLDS)
+    
+    # all columns are features except id, target and kfold columns
+    features = [
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
+    ]
+    
+    df_train = df.reset_index(drop=True)
+
+    # get training data
+    x_train = df_train[features].values
+ 
+    # initialize XGB model
+    model = xgb.XGBClassifier(
+            n_jobs=-1,
+            eval_metric='auc',
+            n_estimators=383  
+            )
+  
+    model.set_params(**tuned_params)
+    
+    # fit model on training data (ohe)
+    model.fit(x_train, df_train.Churn.values)
+    
+    explainer = shap.Explainer(model)
+    shap_values = explainer(df_train[features])
+    
+     # summarize the effects of all the features
+    shap.plots.waterfall(shap_values[0])
+    plt.savefig('shap_waterfall.pdf', format='pdf', dpi=1200, bbox_inches='tight')
+    plt.close()
+    shap.plots.beeswarm(shap_values)
+    plt.savefig('shap_beeswarm.pdf', format='pdf', dpi=1200, bbox_inches='tight')
+    plt.close()
+    shap.plots.bar(shap_values)
+    plt.savefig('shap_bar.pdf', format='pdf', dpi=1200, bbox_inches='tight')
+    plt.close()
+
+  
+    # save model
+    pickle.dump(model, open(MODEL_NAME, "wb"))
+
+
 if __name__ == "__main__":
     start_time = time.time()
 
@@ -280,16 +322,7 @@ if __name__ == "__main__":
     print(f"Mean AUC = {mean_auc}")
     print("Logistic regression completed after--- %s seconds ---" % (time.time() - start_time))
     
-    #XGboost baseline
-    total_auc=0
-    
-    for fold_ in range(5):
-        total_auc+=run_xgboost(fold_)
 
-    mean_auc=total_auc/5
-    print(f"Baseline XGBoost Mean AUC = {mean_auc}")
-    
-    print("Baseline XGBoost model after--- %s seconds ---" % (time.time() - start_time))
     
     #Optuna hyperparam study
     if not os.path.exists(CV_RESULT_DIR):
@@ -323,6 +356,9 @@ if __name__ == "__main__":
     print(f"Tuned XGBooost Mean AUC = {mean_auc}")
     print("XGBoost Hyperparameter tuned complete after--- %s seconds ---" % (time.time() - start_time))
     
-    
+    print_important_features()
+    print("Feature importance complete after--- %s seconds ---" % (time.time() - start_time))
+
+
         
         

@@ -16,7 +16,7 @@ import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 from sklearn import model_selection #
 from sklearn import metrics #
-
+from sklearn.ensemble import RandomForestClassifier
 import os
 import shutil
 import optuna
@@ -116,7 +116,50 @@ def run_logistic(fold):
     # print auc
     print(f"Fold = {fold}, AUC = {auc}")
     return auc
+
+
+def run_randomforest(fold):
+    # load the full training data with folds
+    df = pd.read_csv(TRAIN_FOLDS)
     
+    #df.drop(['userId'], axis=1, inplace=True)
+
+
+    
+    # all columns are features except id, target and kfold columns
+    features = [
+    f for f in df.columns if f not in ("Churn","fold","userId","obsDays")
+    ]
+    # get training data using folds
+    df_train = df[df.kfold != fold].reset_index(drop=True)
+
+    # ge./t validation data using folds
+    df_valid = df[df.kfold == fold].reset_index(drop=True)
+
+    # get training data
+    x_train = df_train[features].values
+    # get validation data
+    x_valid = df_valid[features].values
+
+    # initialize random forest model
+    model = RandomForestClassifier()
+
+
+    # fit model on training data (ohe)
+    model.fit(x_train, df_train.Churn.values)
+    # predict on validation data
+    # we need the probability values as we are calculating AUC
+    # we will use the probability of 1s
+    valid_preds = model.predict(x_valid)
+    print(valid_preds)
+    # get roc auc score
+    f1 = metrics.f1_score(df_valid.Churn.values, valid_preds)
+    auc = metrics.roc_auc_score(df_valid.Churn.values, valid_preds)
+
+    # print auc
+    print(f"Fold = {fold}, AUC = {auc}")
+    return auc
+
     
 def run_xgboost(fold):
     # load the full training data with folds
@@ -140,8 +183,8 @@ def run_xgboost(fold):
     # initialize XGBoost model
     model = xgb.XGBClassifier(
             n_jobs=-1,
-            max_depth=7,
-            n_estimators=200,
+            max_depth=1,
+            n_estimators=10,
             eval_metric='mlogloss'
              )
 
@@ -313,7 +356,7 @@ if __name__ == "__main__":
     create_kfold(df)
     print("Kfold completed after --- %s seconds ---" % (time.time() - start_time))
 
-    #Logistic regression baseline
+    #Logistic regression 
     total_auc=0
     for fold_ in range(5):
          total_auc+=run_logistic(fold_)
@@ -323,6 +366,23 @@ if __name__ == "__main__":
     print("Logistic regression completed after--- %s seconds ---" % (time.time() - start_time))
     
 
+    #Random forest classifier
+    total_auc=0
+    for fold_ in range(5):
+         total_auc+=run_randomforest(fold_)
+        
+    mean_auc=total_auc/5
+    print(f"Random forest Mean AUC = {mean_auc}")
+    print("Random forest completed after--- %s seconds ---" % (time.time() - start_time))
+    
+    #XGBoost classifier
+    total_auc=0
+    for fold_ in range(5):
+         total_auc+=run_xgboost(fold_)
+        
+    mean_auc=total_auc/5
+    print(f"XGBoost Mean AUC = {mean_auc}")
+    print("XGBoost completed after--- %s seconds ---" % (time.time() - start_time))
     
     #Optuna hyperparam study
     if not os.path.exists(CV_RESULT_DIR):

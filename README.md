@@ -37,6 +37,7 @@ https://balamurugan.netlify.app/post/sparkify-churn-analysis/
 - shutil
 - optuna
 - xgboost
+- shap
 
 <a name="Instructions"></a>
 ### Instructions:
